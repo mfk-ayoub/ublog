@@ -1,0 +1,30 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────
+#  ublog – simplified docker-compose (frontend only)
+#
+#  Assumes the gateway is reachable at http://gateway:3000
+#  (add it to this file or run it separately).
+#
+#  Quick start:
+#    make up
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Frontend (Vite dev server) ──────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      PROXY_TARGET: http://gateway:3000
+    networks:
+      - merge
+    restart: unless-stopped
+
+networks:
+  merge:
+    external: true

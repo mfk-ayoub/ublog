@@ -1,0 +1,62 @@
+# Dependencies
+**/node_modules/
+**/.venv/
+**/venv/
+
+# Build and test output
+**/dist/
+**/dist-ssr/
+**/build/
+**/coverage/
+**/.nyc_output/
+**/.pytest_cache/
+
+# Python caches and tooling
+**/__pycache__/
+**/*.py[cod]
+**/.ruff_cache/
+**/.mypy_cache/
+
+# Logs and temporary files
+**/*.log
+**/logs/
+**/*.pid
+**/*.seed
+**/.temp/
+**/.tmp/
+
+# Local environment files (keep examples)
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Local secrets, keys, certificates, and generated service credentials
+**/.secret.*
+!**/.secret.*.example
+**/*.key
+**/*.pem
+**/*.crt
+**/*.csr
+
+# Generated Docker volumes and application uploads
+/storage/
+
+# IDE and operating-system files
+.DS_Store
+.idea/
+.vscode/
+**/*.suo
+**/*.sw?
+**/.project
+**/.classpath
+**/.settings/
+**/*.sublime-workspace
+
+# Package-manager and diagnostic files
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+**/lerna-debug.log*
+**/report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json

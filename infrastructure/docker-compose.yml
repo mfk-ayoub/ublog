@@ -1,0 +1,486 @@
+
+
+x-postgres-db-base: &postgres-db-base
+    # need to specify volumes, network and env/secrets
+    pull_policy: never
+    build: 
+        context: ../services/postgress-db-base
+        dockerfile: infra/postgress-db-base.Dockerfile
+    init: true
+    restart: unless-stopped
+    image: postgres-db-base-image
+    container_name: postgres-db-base
+    healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-myapp}"]
+        interval: 10s
+        timeout:  5s
+        retries: 5
+
+services:
+
+    nginx:
+        pull_policy: never
+        build:
+            context: ../services/nginx
+            dockerfile: infra/nginx.Dockerfile
+        container_name: nginx
+        image: nginx-image
+        restart: unless-stopped
+        ports:
+            - "443:443"
+            - "80:80"
+        volumes:
+            - ../services/nginx/infra/config/nginx.conf:/etc/nginx/nginx.conf:ro
+            - ./secrets/nginx/selfsigned.crt:/etc/nginx/ssl/selfsigned.crt:ro
+            - ./secrets/nginx/selfsigned.key:/etc/nginx/ssl/selfsigned.key:ro
+        depends_on:
+            - frontend
+            - gateway
+        networks:
+            - merge
+
+    gateway:
+        pull_policy: never
+        build:
+            context: ../services/gateway
+            dockerfile: infra/gateway.Dockerfile
+        container_name: gateway
+        image: gateway-image
+        init: true
+        restart: unless-stopped
+        ports:
+            - 8088:3000
+        environment:
+            - SERVICE_PORT=3000
+            - NODE_ENV=development
+            - AI_SERVICE_API_KEY_FILE=/run/secrets/ai-service-key
+        env_file:
+            - ./env/gateway/.env
+            - ./env/jwt/.env
+        secrets:
+            - jwt-public-key
+            - ai-service-key
+        volumes:
+            - gateway-volume:/app/project/src
+        networks:
+            - backend-network
+            - merge
+
+    frontend:
+      build:
+        context: ../services/ublog/frontend
+        dockerfile: Dockerfile
+      container_name: frontend
+      environment:
+        PROXY_TARGET: http://gateway:3000
+      networks:
+        - merge
+      restart: unless-stopped
+
+
+    auth:
+        pull_policy: never
+        build:
+            context: ../services/auth
+            dockerfile: infra/auth.Dockerfile
+        container_name: auth
+        image: auth-image
+        init: true
+        restart: unless-stopped
+        ports:
+            - 3000:3000
+        environment:
+            - SERVICE_PORT=3000
+            - NODE_ENV=development
+        env_file:
+            - ./env/auth-db/.env # INFO same env as auth-db service
+            - ./env/auth/.env
+            - ./env/jwt/.env
+        secrets:
+            - auth-db-password-secret
+            - jwt-private-key
+            - jwt-public-key
+            - google-oauth2-client-secret
+            - mailer-pass
+        volumes:
+            - auth-volume:/app/project/src
+        networks:
+            - backend-network
+            - auth-network
+
+
+    users:
+        pull_policy: never
+        build:
+            context: ../services/users
+            dockerfile: infra/users.Dockerfile
+        container_name: users
+        image: users-image
+        init: true
+        restart: unless-stopped
+        ports:
+            - 3001:3000
+        environment:
+            - SERVICE_PORT=3000
+            - NODE_ENV=development
+        env_file:
+            - ./env/users-db/.env # INFO same env as auth-db service
+            # - ./env/u/.env
+        secrets:
+            - users-db-password-secret
+        volumes:
+            - users-volume:/app/project/src
+            - users-uploads-volume:/app/project/uploads
+        networks:
+            - backend-network
+            - users-network
+
+    articles:
+        pull_policy: never
+        build:
+            context: ../services/articles
+            dockerfile: infra/articles.Dockerfile
+        container_name: articles
+        image: articles-image
+        init: true
+        restart: unless-stopped
+        ports:
+            - 3002:3000
+        environment:
+            - SERVICE_PORT=3000
+            - NODE_ENV=development
+        env_file:
+            - ./env/articles-db/.env # INFO same env as auth-db service
+            # - ./env/u/.env
+        secrets:
+            - articles-db-password-secret
+        volumes:
+            - articles-volume:/app/project/src
+            - articles-uploads-volume:/app/project/uploads
+        networks:
+            - backend-network
+            - articles-network
+
+
+    auth-db:
+        <<: *postgres-db-base
+        container_name: auth-db
+        image: auth-db-image
+        secrets:
+            - auth-db-password-secret
+        env_file:
+            - ./env/auth-db/.env
+        volumes:
+            - auth-db-volume:/var/lib/postgresql
+        networks:
+            - auth-network
+    users-db:
+        <<: *postgres-db-base
+        container_name: users-db
+        image: users-db-image
+        secrets:
+            - users-db-password-secret
+        env_file:
+            - ./env/users-db/.env
+        volumes:
+            - users-db-volume:/var/lib/postgresql
+        networks:
+            - users-network
+
+
+    articles-db:
+        <<: *postgres-db-base
+        container_name: articles-db
+        image: articles-db-image
+        secrets:
+            - articles-db-password-secret
+        env_file:
+            - ./env/articles-db/.env
+        volumes:
+            - articles-db-volume:/var/lib/postgresql
+        networks:
+            - articles-network
+
+    ai-api:
+        pull_policy: never
+        build: 
+            context: ../services/ai-system
+            dockerfile: infra/ai.Dockerfile
+        container_name: ai-api
+        env_file:
+            - ./env/ai-api/.env
+        environment:
+            - AI_SERVICE_API_KEY_FILE=/run/secrets/ai-service-key
+        secrets:
+            - ai-service-key
+        expose:
+            - "8000"
+        depends_on:
+            - mongodb
+            - qdrant
+        networks:
+            - ai-net
+            - backend-network
+        volumes:
+            - ../services/ai-system/app:/app
+
+    mongodb:
+        image: mongo:latest
+        container_name: mongodb_db
+        restart: always
+        env_file:
+            - ./env/mongodb/.env
+        volumes:
+            - mongodb-volume:/data/db
+            - mongodb-config-volume:/data/configdb
+        networks:
+              - ai-net
+        
+    qdrant:
+        image: qdrant/qdrant:latest
+        container_name: qdrant
+        ports:
+            - "6333:6333"
+            - "6334:6334"
+        networks:
+            - ai-net
+        volumes:
+            - qdrant-volume:/qdrant/storage
+
+    # ── Monitoring stack ──────────────────────────────────────
+
+    cadvisor:
+        image: gcr.io/cadvisor/cadvisor:latest
+        container_name: cadvisor
+        restart: unless-stopped
+        privileged: true
+        volumes:
+            - /:/rootfs:ro
+            - /var/run:/var/run:ro
+            - /sys:/sys:ro
+            - /var/lib/docker/:/var/lib/docker:ro
+            - /dev/disk/:/dev/disk:ro
+        networks:
+            - monitoring
+
+    prometheus:
+        image: prom/prometheus:latest
+        container_name: prometheus
+        restart: unless-stopped
+        command:
+            - '--config.file=/etc/prometheus/prometheus.yml'
+            - '--storage.tsdb.path=/prometheus'
+            - '--storage.tsdb.retention.time=30d'
+            - '--web.enable-lifecycle'
+        ports:
+            - "9090:9090"
+        volumes:
+            - ../services/monitoring/prometheus/infra/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+            - ../services/monitoring/prometheus/infra/config/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+            - prometheus-volume:/prometheus
+        depends_on:
+            - cadvisor
+        networks:
+            - monitoring
+
+    alertmanager:
+        image: prom/alertmanager:latest
+        container_name: alertmanager
+        restart: unless-stopped
+        command:
+            - '--config.file=/etc/alertmanager/alertmanager.yml'
+            - '--storage.path=/alertmanager'
+        ports:
+            - "9093:9093"
+        volumes:
+            - ../services/monitoring/alertmanager/infra/config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+            - alertmanager-volume:/alertmanager
+        depends_on:
+            - prometheus
+        networks:
+            - monitoring
+
+    webhook-receiver:
+        pull_policy: never
+        build:
+            context: ../services/monitoring/webhook-receiver
+            dockerfile: infra/webhook-receiver.Dockerfile
+        container_name: webhook-receiver
+        image: webhook-receiver-image
+        restart: unless-stopped
+        ports:
+            - "5001:5001"
+        networks:
+            - monitoring
+
+    grafana:
+        image: grafana/grafana:latest
+        container_name: grafana
+        restart: unless-stopped
+        environment:
+            - GF_SECURITY_ADMIN_USER=admin
+            - GF_SECURITY_ADMIN_PASSWORD=admin
+            - GF_USERS_ALLOW_SIGN_UP=false
+        ports:
+            - "3333:3000"
+        volumes:
+            - ../services/monitoring/grafana/infra/config/provisioning:/etc/grafana/provisioning:ro
+            - ../services/monitoring/grafana/infra/config/dashboards:/var/lib/grafana/dashboards:ro
+            - grafana-volume:/var/lib/grafana
+        depends_on:
+            - prometheus
+        networks:
+            - monitoring
+
+
+networks:
+    backend-network:
+        name: backend-network
+        driver: bridge
+    frontend-network:
+        name: frontend-network
+        driver: bridge
+    auth-network:
+        name: auth-network
+        driver: bridge
+    users-network:
+        name: users-network
+        driver: bridge
+    articles-network:
+        name: articles-network
+        driver: bridge
+    ai-net:
+        name: ai-net
+        driver: bridge
+    merge:
+        name: merge
+        driver: bridge
+    monitoring:
+        name: monitoring
+        driver: bridge
+
+volumes:
+    auth-db-volume:
+        driver: local
+        name: "auth-db-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/auth-db-volume
+    users-db-volume:
+        driver: local
+        name: "users-db-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/users-db-volume
+    articles-db-volume:
+        driver: local
+        name: "articles-db-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/articles-db-volume
+    auth-volume:
+        driver: local
+        name: "auth-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../services/auth/app/src
+    users-volume:
+        driver: local
+        name: "users-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../services/users/app/src
+    articles-volume:
+        driver: local
+        name: "articles-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../services/articles/app/src
+    gateway-volume:
+        driver: local
+        name: "gateway-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../services/gateway/app/src
+    mongodb-volume:
+        driver: local
+        name: "mongodb-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/mongo-db-volume
+    mongodb-config-volume:
+        driver: local
+        name: "mongodb-config-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/mongo-db-config-volume
+    qdrant-volume:
+        driver: local
+        name: "qdrant-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/qdrant-volume
+    articles-uploads-volume:
+        driver: local
+        name: "articles-uploads-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/articles-uploads-volume
+    users-uploads-volume:
+        driver: local
+        name: "users-uploads-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/users-uploads-volume
+    prometheus-volume:
+        driver: local
+        name: "prometheus-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/prometheus-volume
+    grafana-volume:
+        driver: local
+        name: "grafana-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/grafana-volume
+    alertmanager-volume:
+        driver: local
+        name: "alertmanager-volume"
+        driver_opts:
+            type: none
+            o: bind
+            device: ../storage/alertmanager-volume
+
+secrets:
+    ai-service-key:
+        file: ./secrets/ai-system/service.key
+    auth-db-password-secret:
+        file: ./secrets/auth-db/.secret.auth-db-password-secret
+    users-db-password-secret:
+        file: ./secrets/users-db/.secret.users-db-password-secret
+    articles-db-password-secret:
+        file: ./secrets/users-db/.secret.users-db-password-secret
+
+    jwt-private-key:
+        file: ./secrets/jwt/private.key
+    jwt-public-key:
+        file: ./secrets/jwt/public.key
+    google-oauth2-client-secret:
+        file: ./secrets/auth/.secret.google-oauth2-client-secret
+    mailer-pass:
+        file: ./secrets/mailer/.secret.mailer-pass

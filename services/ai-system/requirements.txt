@@ -1,0 +1,10 @@
+fastapi
+anyio
+uvicorn[standard]
+motor
+pydantic>=2
+pydantic-settings
+groq
+langchain-text-splitters
+qdrant-client
+google-genai

@@ -1,0 +1,1 @@
+find . -type f -name "*.example" -exec bash -c '[ ! -e "${0%.example}" ] && cp "$0" "${0%.example}"' {} \;

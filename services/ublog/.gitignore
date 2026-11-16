@@ -1,0 +1,19 @@
+# Dependencies
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+frontend/dist-ssr/
+
+# Environment files (keep .env.example)
+.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.sw?
